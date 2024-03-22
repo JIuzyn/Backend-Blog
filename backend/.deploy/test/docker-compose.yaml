@@ -1,0 +1,60 @@
+version: '3'
+networks:
+  test-network-local:
+    driver: bridge
+
+services:
+  backend-test:
+    build:
+      context: ../../
+      dockerfile: .deploy/local/Dockerfile
+      args:
+        USER: ${LOCAL_USER:-www}
+    entrypoint: [ "/bin/sh", "-c", "composer install && yes | php artisan migrate:fresh && yes | php artisan test" ]
+    container_name: ${LOCAL_USER:-www}-backend-test
+    image: backend-test
+    volumes:
+      - ../../laravel:/app
+    environment:
+      - APP_ENV=staging
+      - DB_CONNECTION=pgsql
+      - DB_HOST=db-test
+      - DB_PORT=5432
+      - DB_DATABASE=${DB_NAME:-test}
+      - DB_USERNAME=${DB_PASSWORD:-test}
+      - DB_PASSWORD=${DB_USERNAME:-test}
+    depends_on:
+      db-test:
+        condition: service_healthy
+    networks:
+      - test-network-local
+
+  db-test:
+    image: postgres:15-alpine3.17
+    container_name: db-test
+    networks:
+      - test-network-local
+    environment:
+      POSTGRES_DB: ${DB_NAME:-test}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-test}
+      POSTGRES_USER: ${DB_USERNAME:-test}
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USERNAME:-test} -d ${DB_NAME:-test}" ]
+      interval: 5s
+      timeout: 25s
+      retries: 10
+
+  centrifugo-test:
+    build:
+      context: ../../../centrifugo
+      dockerfile: ./Dockerfile
+      args:
+        CENTRIFUGO_TOKEN_HMAC_SECRET_KEY: ${CENTRIFUGO_TOKEN_HMAC_SECRET_KEY:-1dcc78b0-2abe-4e26-89e6-de1cea0e0949}
+        CENTRIFUGO_ADMIN_PASSWORD: ${CENTRIFUGO_ADMIN_PASSWORD:-admin_password}
+        CENTRIFUGO_API_KEY: ${CENTRIFUGO_API_KEY:-6b39712f-e984-4d82-8369-9c45f3111f9e}
+        CENTRIFUGO_ADMIN_SECRET: ${CENTRIFUGO_ADMIN_SECRET:-9b6f6854-7525-4025-99df-0a8f288acdd0}
+        ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+    container_name: ${LOCAL_USER:-www}-centrifugo-test
+    image: ${LOCAL_USER:-www}/centrifugo-test
+    networks:
+      - test-network-local

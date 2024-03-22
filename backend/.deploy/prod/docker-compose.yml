@@ -1,0 +1,94 @@
+version: '3'
+
+networks:
+  backend-prod:
+    driver: bridge
+  backend-prod-storage:
+    driver: bridge
+
+volumes:
+  db-prod:
+    driver: local
+
+services:
+  proxy:
+    build:
+      context: ../../../proxy
+      dockerfile: .deploy/prod.Dockerfile
+      args:
+        CONFIG_FILE: backend/backend.prod.conf
+    image: proxy-prod
+    container_name: proxy-prod
+    ports:
+      - "${PROXY_PORT:-80}:80"
+    networks:
+      - backend-prod
+    restart: unless-stopped
+    environment:
+      NGINX_SERVER: ${NGINX_SERVER:-localhost}
+    depends_on:
+      - backend-api
+      - centrifugo
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: .deploy/prod/Dockerfile
+    entrypoint: ["/usr/bin/supervisord", "-n"]
+    image: backend-prod
+    container_name: backend-prod
+    volumes:
+      - backend-prod-storage:/app/storage
+    networks:
+      - backend-prod
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+
+  backend-api:
+    build:
+      context: ../..
+      dockerfile: .deploy/prod/nginx/Dockerfile
+    image: backend-api-prod
+    container_name: backend-api-prod
+    volumes:
+      - backend-prod-storage:/app/storage
+    networks:
+      - backend-prod
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  db:
+    image: postgres:15-alpine3.17
+    container_name: db-prod
+    volumes:
+      - db-prod:/var/lib/postgresql/data
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-laravel}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-QWEasd123@}
+      POSTGRES_USER: ${DB_USERNAME:-postgres}
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_NAME:-laravel}" ]
+      interval: 5s
+      timeout: 25s
+      retries: 10
+  
+  centrifugo:
+    build:
+        context: ../../../centrifugo
+        dockerfile: ./Dockerfile
+        args:
+          CENTRIFUGO_TOKEN_HMAC_SECRET_KEY: ${CENTRIFUGO_TOKEN_HMAC_SECRET_KEY:-1dcc78b0-2abe-4e26-89e6-de1cea0e0949}
+          CENTRIFUGO_ADMIN_PASSWORD: ${CENTRIFUGO_ADMIN_PASSWORD:-admin_password}
+          CENTRIFUGO_API_KEY: ${CENTRIFUGO_API_KEY:-6b39712f-e984-4d82-8369-9c45f3111f9e}
+          CENTRIFUGO_ADMIN_SECRET: ${CENTRIFUGO_ADMIN_SECRET:-9b6f6854-7525-4025-99df-0a8f288acdd0}
+          ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-*}
+    container_name: ${LOCAL_USER:-www}-centrifugo
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
